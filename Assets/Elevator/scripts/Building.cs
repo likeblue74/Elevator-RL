@@ -5,6 +5,7 @@ using MLAgents;
 
 
 
+
 public class Building : MonoBehaviour
 {
 
@@ -17,15 +18,17 @@ public class Building : MonoBehaviour
     static GameObject resfloor;
     static float simulation_interval = 3f;
 
-    List<ElevatorAgent> listElve = new List<ElevatorAgent>();
+    List<Elevator> listElve = new List<Elevator>();
     List<Buildfloor> listFloor = new List<Buildfloor>();
 
-    ElevatorAgent[,] callReqReserveCar;
+    Elevator[,] callReqReserveCar;
 
 
     static int episodeTotalPassinger ;
 
     static GameObjPool s_GameObjPool;
+
+    public ElevatorCtrlCenterAgent centerCtrlAgent;
 
     int currentPassinger;
     int restPassinger;
@@ -41,12 +44,71 @@ public class Building : MonoBehaviour
     float startTime = 0;
 
     int success = 0;
+    int fail = 0;
 
     // Update is called once per frame
-    void Update () {
-		
-	}
+    public  void InitializeAgent()
+    {
 
+        if (s_GameObjPool == null)
+            s_GameObjPool = new GameObjPool();
+
+        if (resElevator == null)
+            resElevator = (GameObject)Resources.Load("Elevator/elevator_unit");
+
+        if (resfloor == null)
+            resfloor = (GameObject)Resources.Load("Elevator/build_floor");
+
+
+        if (academy == null)
+            academy = FindObjectOfType<ElevatorAcademy>();
+    }
+
+
+
+
+    public  void CollectObservations(Agent a)
+    {
+
+        CollectObsFloor(a);
+
+        for(int i=0; i< listElve.Count;++i)
+        {
+            listElve[i].CollectObsElevator(a);
+        }
+
+
+    }
+
+
+    public void CollectObsFloor(Agent a)
+    {
+        for (int i = 0; i < ElevatorAcademy.floors; ++i)
+        {
+            var f = GetFloor(i);
+            a.AddVectorObs(f.GetPassingerCount());
+            a.AddVectorObs(f.IsCallRequest(MOVE_STATE.Down));
+            a.AddVectorObs(f.IsCallRequest(MOVE_STATE.Up));
+        }
+    }
+
+
+    // to be implemented by the developer
+    public void AgentAction(float[] vectorAction, string textAction,out float reward)
+    {
+
+        reward = 0;
+
+        int el = (int)vectorAction[0];
+
+        if (el < 0 || el >= listElve.Count)
+            return;
+
+
+        float[] elAction = new float[vectorAction.Length - 1];
+        System.Array.Copy(vectorAction, elAction, elAction.Length);
+        listElve[el].AgentAction(elAction, textAction,out reward);
+    }
 
     public void InitEnv()
     {
@@ -63,13 +125,37 @@ public class Building : MonoBehaviour
             academy = FindObjectOfType<ElevatorAcademy>();
 
 
-        callReqReserveCar = new ElevatorAgent[ElevatorAcademy.floors, 2];
+        callReqReserveCar = new Elevator[ElevatorAcademy.floors, 2];
 
         ElevatorPassenger.InitPooler();
 
 
         if (elevatorBrain == null)
-            elevatorBrain = academy.gameObject.transform.Find("ElevatorBrain").GetComponent<MLAgents.Brain>();
+        {
+
+            var brainObj = academy.gameObject.transform.Find("ElevatorBrain");
+
+            if(brainObj)
+             elevatorBrain = brainObj.GetComponent<MLAgents.Brain>();
+        }
+
+        if (elevatorBrain == null)
+        {
+            var brainObj = academy.gameObject.transform.Find("ElevatorctrlBrain");
+
+            if (brainObj)
+                elevatorBrain = academy.gameObject.transform.Find("ElevatorctrlBrain").GetComponent<MLAgents.Brain>();
+
+            centerCtrlAgent = gameObject.GetComponent<ElevatorCtrlCenterAgent>();
+
+
+            if (centerCtrlAgent != null)
+            {
+                resElevator.GetComponent<ElevatorAgent>().enabled = false;
+            }
+
+            //centerCtrlAgent.GiveBrain(elevatorBrain);
+        }
 
 
 
@@ -107,14 +193,27 @@ public class Building : MonoBehaviour
             }
 
             GameObject ele = (GameObject)Instantiate(resElevator, this.transform);
-            ele.transform.position = startPos + (Vector3.right * dist * i);
 
-            var agent = ele.GetComponent<ElevatorAgent>();
-            listElve.Add(agent);
-            agent.GiveBrain(elevatorBrain);
-            agent.InitFloor(i, ElevatorAcademy.floors);
-            agent.agentParameters.agentCameras[0] = GameObject.Find("agent_cam").GetComponent<Camera>();
-            agent.AgentReset();
+            ele.transform.position = startPos + (Vector3.right * dist * i);
+            var el = ele.GetComponent<Elevator>();
+            listElve.Add(el);
+            el.InitFloor(i, ElevatorAcademy.floors);
+
+            if (centerCtrlAgent == null)
+            {
+                var agent = ele.GetComponent<ElevatorAgent>();
+           
+                agent.GiveBrain(elevatorBrain);
+                //agent.agentParameters.agentCameras[0] = GameObject.Find("agent_cam").GetComponent<Camera>();
+                agent.AgentReset();
+                el.agent = agent;
+            }
+            else
+            {
+                var agent = ele.GetComponent<ElevatorAgent>();
+                agent.enabled = false;
+                el.agent = centerCtrlAgent;
+            }
 
         }
 
@@ -155,7 +254,7 @@ public class Building : MonoBehaviour
           
             foreach (var el in listElve)
             {
-                el.SetReward(1f);
+                el.SetReward(10f);
                 //el.Done();
             }
 
@@ -165,8 +264,20 @@ public class Building : MonoBehaviour
             return;
         }
 
-     
-      
+
+        if (academy.GetStepCount()+1== academy.maxSteps)
+        {
+            foreach (var el in listElve)
+            {
+                el.SetReward(-10f);
+                fail += 1;
+                //el.Done();
+            }
+
+        }
+
+
+
     }
 
     public void UpdatePos()
@@ -311,7 +422,7 @@ public class Building : MonoBehaviour
 
     }
 
-    public MOVE_STATE GetAction(int floor,ElevatorAgent el)
+    public MOVE_STATE GetAction(int floor,Elevator el)
     {
         return MOVE_STATE.Stop;
     }
@@ -348,6 +459,8 @@ public class Building : MonoBehaviour
 
     }
 
+   
+
     public int GetRestPassinger()
     {
         return ElevatorAcademy.passinger-destPassinger;
@@ -355,10 +468,10 @@ public class Building : MonoBehaviour
 
     private void OnGUI()
     {
-        GUI.TextArea(new Rect(10, 10, 200,25),
-            string.Format("EP:{0}-Step:{1} Suc:{2}", academy.GetEpisodeCount(), academy.GetStepCount(), success));
+        GUI.TextArea(new Rect(10, 10, 250,25),
+            string.Format("EP:{0}-Step:{1} Suc:{2} Fail:{3}", success+fail, academy.GetStepCount(), success,fail));
 
-        GUI.TextArea(new Rect(10, 40, 200, 25),
+        GUI.TextArea(new Rect(10, 40, 250, 25),
           string.Format("Passinger:{0}/{1}", destPassinger, ElevatorAcademy.passinger));
     }
 

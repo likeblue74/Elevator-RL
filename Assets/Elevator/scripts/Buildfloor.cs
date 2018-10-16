@@ -16,9 +16,9 @@ public class Buildfloor : MonoBehaviour
 
     public List<ElevatorPassenger> listPassinger = new List<ElevatorPassenger>();
 
-    public List<ElevatorAgent> LandingElevators = new List<ElevatorAgent>();
+    public List<Elevator> LandingElevators = new List<Elevator>();
 
-    public ElevatorAgent[] callReservedEl = new ElevatorAgent[(int)MOVE_STATE.end];
+    public Elevator[] callReservedEl = new Elevator[(int)MOVE_STATE.end];
 
     
 
@@ -170,7 +170,7 @@ public class Buildfloor : MonoBehaviour
 
     }
 
-    public void EnterElevator(ElevatorAgent el)
+    public void EnterElevator(Elevator el)
     {
 
         if (floorNo != (int)el.GetFloor() || !el.IsEnterableState())
